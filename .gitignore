@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/
+data/processed/
+*.csv
+*.json
+*.jsonl
+*.parquet
+*.pkl
+*.joblib
+
+# Models / embeddings
+models/
+embeddings/
+*.npy
+*.npz
+*.pt
+*.bin
+
+# Environment variables
+.env
+
+# OS / IDE
+.DS_Store
+.vscode/
