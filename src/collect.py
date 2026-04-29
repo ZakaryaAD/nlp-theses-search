@@ -1,4 +1,5 @@
 import argparse
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,7 @@ API_URL = "https://theses.fr/api/v1/theses/recherche/"
 
 def safe_get(data: dict[str, Any], keys: list[str], default: Any = None) -> Any:
     """
-    Essaie plusieurs clés possibles dans un dictionnaire.
-
-    Utile car les APIs peuvent avoir des noms de champs différents
-    selon les endpoints ou les versions.
+    Try several possible keys in a dictionary and return the first non-empty value.
     """
     for key in keys:
         if key in data and data[key] not in [None, "", []]:
@@ -26,14 +24,14 @@ def safe_get(data: dict[str, Any], keys: list[str], default: Any = None) -> Any:
 
 def normalize_text_field(value: Any) -> str:
     """
-    Convertit un champ texte API en string propre.
+    Convert an API field into a clean string.
 
-    Cas possibles :
-    - string simple
-    - liste de strings
-    - dictionnaire
+    Handles:
+    - strings
+    - lists
+    - dictionaries
     - None
-    - autre type inattendu
+    - unexpected types
     """
     if value is None:
         return ""
@@ -50,12 +48,97 @@ def normalize_text_field(value: Any) -> str:
     return str(value).strip()
 
 
+def extract_year(item: dict[str, Any]) -> str:
+    """
+    Extract a year from the available date fields.
+
+    For defended theses, dateSoutenance is usually the relevant date.
+    For ongoing theses, datePremiereInscriptionDoctorat can be available instead.
+
+    The API may return dates like:
+    - "2024-10-01"
+    - "08/10/2025"
+    - None
+    """
+    candidate_keys = [
+        "dateSoutenance",
+        "datePremiereInscriptionDoctorat",
+        "date_soutenance",
+        "anneeSoutenance",
+        "annee",
+        "year",
+    ]
+
+    for key in candidate_keys:
+        text = normalize_text_field(item.get(key))
+        match = re.search(r"\b(19|20)\d{2}\b", text)
+        if match:
+            return match.group(0)
+
+    # Fallback: inspect every date-like field.
+    for key, value in item.items():
+        key_lower = str(key).lower()
+        if "date" in key_lower or "annee" in key_lower or "year" in key_lower:
+            text = normalize_text_field(value)
+            match = re.search(r"\b(19|20)\d{2}\b", text)
+            if match:
+                return match.group(0)
+
+    return ""
+
+
+def extract_subjects(item: dict[str, Any]) -> str:
+    """
+    Extract subject keywords from theses.fr fields.
+
+    In the search API, subjects often look like:
+    [
+        {"langue": "fr", "libelle": "Intelligence Artificielle"},
+        {"langue": "en", "libelle": "Artificial Intelligence"}
+    ]
+    """
+    subjects = safe_get(
+        item,
+        ["sujets", "subjects", "keywords", "motsCles"],
+        default=[],
+    )
+
+    labels = []
+
+    if isinstance(subjects, list):
+        for subject in subjects:
+            if isinstance(subject, dict):
+                label = subject.get("libelle") or subject.get("label") or subject.get("value")
+                if label:
+                    labels.append(str(label).strip())
+            elif isinstance(subject, str):
+                labels.append(subject.strip())
+
+    elif isinstance(subjects, dict):
+        for value in subjects.values():
+            text = normalize_text_field(value)
+            if text:
+                labels.append(text)
+
+    elif isinstance(subjects, str):
+        labels.append(subjects.strip())
+
+    # Remove duplicates while preserving order.
+    seen = set()
+    unique_labels = []
+
+    for label in labels:
+        label_lower = label.lower()
+        if label_lower not in seen:
+            unique_labels.append(label)
+            seen.add(label_lower)
+
+    return " ; ".join(unique_labels)
+
+
 def fetch_page(query: str, start: int, page_size: int) -> dict[str, Any]:
     """
-    Récupère une page de résultats depuis l'API theses.fr.
-
-    start = indice du premier résultat.
-    page_size = nombre de résultats à récupérer.
+    Fetch one result page from the theses.fr search API.
     """
     params = {
         "q": query,
@@ -80,17 +163,14 @@ def fetch_page(query: str, start: int, page_size: int) -> dict[str, Any]:
 
 def extract_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """
-    Récupère la liste de résultats dans la réponse JSON.
-
-    On anticipe plusieurs structures possibles :
-    - {"theses": [...]}
-    - {"resultats": [...]}
-    - {"results": [...]}
-    - {"data": [...]}
-    - {"response": {"docs": [...]}}
+    Extract the list of theses from the API response.
     """
+    theses = payload.get("theses")
+
+    if isinstance(theses, list):
+        return theses
+
     candidates = [
-        "theses",
         "resultats",
         "results",
         "documents",
@@ -111,51 +191,28 @@ def extract_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(subvalue, list):
                     return subvalue
 
-    for value in payload.values():
-        if isinstance(value, list) and all(isinstance(x, dict) for x in value):
-            return value
-
-        if isinstance(value, dict):
-            for subvalue in value.values():
-                if isinstance(subvalue, list) and all(
-                    isinstance(x, dict) for x in subvalue
-                ):
-                    return subvalue
-
     return []
 
 
 def parse_thesis(item: dict[str, Any]) -> dict[str, str]:
     """
-    Transforme un résultat brut de l'API en ligne tabulaire propre.
-
-    Sortie cible :
-    id, title, abstract, year, discipline, institution, url
+    Convert one raw API result into one clean tabular row.
     """
     thesis_id = safe_get(
         item,
-        [
-            "id",
-            "nnt",
-            "num",
-            "numero",
-            "identifiant",
-            "idThese",
-            "these_id",
-            "id_these",
-        ],
+        ["id", "nnt", "num", "numero", "identifiant", "idThese", "these_id", "id_these"],
         default="",
     )
 
     title = safe_get(
         item,
-        [
-            "titre",
-            "title",
-            "titrePrincipal",
-            "title_s",
-            "titres",
-        ],
+        ["titrePrincipal", "titre", "title", "title_s", "titres"],
+        default="",
+    )
+
+    title_en = safe_get(
+        item,
+        ["titreEN", "title_en", "titleEN"],
         default="",
     )
 
@@ -176,19 +233,14 @@ def parse_thesis(item: dict[str, Any]) -> dict[str, str]:
 
     discipline = safe_get(
         item,
-        [
-            "discipline",
-            "disciplines",
-            "domaine",
-            "domaines",
-            "discipline_s",
-        ],
+        ["discipline", "disciplines", "domaine", "domaines", "discipline_s"],
         default="",
     )
 
     institution = safe_get(
         item,
         [
+            "etabSoutenanceN",
             "etablissement",
             "etablissements",
             "institution",
@@ -199,34 +251,27 @@ def parse_thesis(item: dict[str, Any]) -> dict[str, str]:
         default="",
     )
 
-    date = safe_get(
+    status = safe_get(
         item,
-        [
-            "dateSoutenance",
-            "date_soutenance",
-            "date",
-            "anneeSoutenance",
-            "annee",
-        ],
+        ["status", "statut"],
         default="",
     )
 
-    thesis_id = normalize_text_field(thesis_id)
-    title = normalize_text_field(title)
-    abstract = normalize_text_field(abstract)
-    discipline = normalize_text_field(discipline)
-    institution = normalize_text_field(institution)
+    year = extract_year(item)
+    subjects = extract_subjects(item)
 
-    date_str = normalize_text_field(date)
-    year = date_str[:4] if len(date_str) >= 4 and date_str[:4].isdigit() else ""
+    thesis_id = normalize_text_field(thesis_id)
 
     return {
         "id": thesis_id,
-        "title": title,
-        "abstract": abstract,
+        "title": normalize_text_field(title),
+        "title_en": normalize_text_field(title_en),
+        "abstract": normalize_text_field(abstract),
         "year": year,
-        "discipline": discipline,
-        "institution": institution,
+        "discipline": normalize_text_field(discipline),
+        "subjects": subjects,
+        "institution": normalize_text_field(institution),
+        "status": normalize_text_field(status),
         "url": f"https://theses.fr/{thesis_id}" if thesis_id else "",
     }
 
@@ -238,13 +283,10 @@ def collect_theses(
     sleep_seconds: float,
 ) -> pd.DataFrame:
     """
-    Collecte des thèses pour plusieurs requêtes.
+    Collect theses for several search queries.
 
-    Mental model :
-    - chaque requête donne plusieurs pages ;
-    - chaque page contient plusieurs résultats ;
-    - chaque résultat brut est converti en ligne propre ;
-    - on supprime les doublons par id.
+    Each query returns paginated results.
+    Results are parsed into rows and deduplicated by thesis id.
     """
     rows: list[dict[str, str]] = []
 
@@ -272,10 +314,13 @@ def collect_theses(
     expected_columns = [
         "id",
         "title",
+        "title_en",
         "abstract",
         "year",
         "discipline",
+        "subjects",
         "institution",
+        "status",
         "url",
     ]
 
@@ -291,6 +336,7 @@ def collect_theses(
     df = df[expected_columns].copy()
 
     df = df.drop_duplicates(subset=["id"])
+    df = df[df["id"].str.len() > 0].copy()
     df = df[df["title"].str.len() > 0].copy()
     df = df.reset_index(drop=True)
 
@@ -340,7 +386,20 @@ def main() -> None:
 
     if not df.empty:
         print("\nAperçu :")
-        print(df[["id", "title", "year", "discipline"]].head())
+        print(
+            df[
+                [
+                    "id",
+                    "title",
+                    "title_en",
+                    "year",
+                    "discipline",
+                    "subjects",
+                    "institution",
+                    "status",
+                ]
+            ].head()
+        )
     else:
         print("\nAucun résultat collecté.")
         print("Il faut inspecter la structure JSON retournée par l'API.")

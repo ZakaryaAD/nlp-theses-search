@@ -113,13 +113,44 @@ This creates:
 ```text
 data/raw/theses_raw.csv
 ```
+## Abstract enrichment
+
+The theses.fr search API provides structured metadata such as titles, disciplines, subjects, institutions and dates. However, abstracts are not included directly in the search endpoint.
+
+To enrich the dataset with abstracts, the project includes an optional scraping step that extracts the visible abstract from each thesis detail page.
+
+For a quick test on 20 theses:
+
+```bash
+python -m src.enrich_abstracts --limit 20
+```
+
+For a larger enrichment on the first 1,000 theses:
+
+```bash
+python -m src.enrich_abstracts --limit 1000 --sleep-seconds 0.3
+```
+
+To enrich the full dataset:
+
+```bash
+python -m src.enrich_abstracts --limit -1 --sleep-seconds 0.3
+```
+
+This creates:
+
+```text
+data/raw/theses_raw_enriched.csv
+```
+
+The enrichment step is separated from the initial collection because it is slower and relies on thesis detail pages rather than the search API.
 
 ## Preprocessing
 
-To clean the raw data and build the searchable text field:
+To clean the enriched data and build the searchable text field:
 
 ```bash
-python -m src.preprocess
+python -m src.preprocess --input data/raw/theses_raw_enriched.csv --output data/processed/theses_clean.csv
 ```
 
 This creates:
@@ -128,8 +159,13 @@ This creates:
 data/processed/theses_clean.csv
 ```
 
-The `text` column is built by concatenating the title, abstract, and discipline.
+The final `text` column is built by concatenating:
 
+```text
+title + title_en + abstract + discipline + subjects + institution
+```
+
+This field is used by both TF-IDF and embedding-based retrieval models.
 ## Planned methods
 
 ### 1. TF-IDF retrieval
