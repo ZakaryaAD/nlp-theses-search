@@ -29,7 +29,7 @@ A lexical search engine works well when the query and the document share the sam
 
 For example, a query about deep learning for medical imaging may be relevant to theses mentioning neural networks, image registration, segmentation, radiology or computer-aided diagnosis, even if the exact query terms are not all present.
 
-The goal of this project is to study whether semantic embeddings improve retrieval quality compared with a sparse lexical baseline on enriched theses.fr metadata and abstracts.
+The goal of this project is to study whether semantic embeddings improve retrieval quality compared with a sparse lexical baseline on enriched theses.fr titles and abstracts.
 
 ---
 
@@ -66,7 +66,7 @@ Each thesis contains the following fields:
 | `institution` | Institution or university |
 | `status` | Thesis status |
 | `url` | Link to the thesis page |
-| `text` | Final searchable text field |
+| `text` | Final searchable text field built from title, English title and abstract |
 
 Raw and processed datasets are not committed to the repository to keep it lightweight. They can be regenerated using the scripts in `src/`.
 
@@ -90,10 +90,7 @@ nlp-theses-search/
 │   ├── preprocess.py
 │   ├── tfidf_search.py
 │   ├── embedding_search.py
-│   ├── evaluation.py
-│   └── utils.py
 │── report/
-│── app.py
 │── requirements.txt
 │── README.md
 │── .gitignore
@@ -107,7 +104,7 @@ nlp-theses-search/
 |---|---|
 | `src/collect.py` | Collects thesis metadata from the theses.fr search API. |
 | `src/enrich_abstracts.py` | Visits individual thesis pages and extracts visible abstracts from HTML. |
-| `src/preprocess.py` | Builds the final searchable `text` field. |
+| `src/preprocess.py` | Builds the final searchable `text` field from title, English title and abstract. |
 | `src/tfidf_search.py` | Implements TF-IDF retrieval with cosine similarity. |
 | `src/embedding_search.py` | Implements semantic retrieval using pretrained multilingual Sentence Transformer embeddings. |
 | `notebooks/01_exploration.ipynb` | Exploratory data analysis of the processed corpus. |
@@ -117,7 +114,35 @@ nlp-theses-search/
 
 ---
 
+## Requirements
+
+Recommended Python version:
+
+- Python 3.10 or 3.11
+
+Main libraries used:
+
+- pandas
+- numpy
+- scikit-learn
+- requests
+- beautifulsoup4
+- lxml
+- sentence-transformers
+- torch
+- matplotlib
+- jupyter
+
+---
+
 ## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/ZakaryaAD/nlp-theses-search.git
+cd nlp-theses-search
+```
 
 Create and activate a virtual environment:
 
@@ -131,7 +156,7 @@ On Windows:
 .venv\Scripts\activate
 ```
 
-On Linux or macOS:
+On macOS or Linux:
 
 ```bash
 source .venv/bin/activate
@@ -230,10 +255,12 @@ data/processed/theses_clean.csv
 The final `text` column is built by concatenating:
 
 ```text
-title + title_en + abstract + discipline + subjects + institution
+title + title_en + abstract
 ```
 
-This makes retrieval robust to missing abstracts. If an abstract is unavailable, the thesis can still be retrieved through its title, English title, discipline, subjects and institution.
+Other fields such as `discipline`, `subjects`, `institution`, `year`, `status` and `url` are kept as metadata for exploratory analysis, result display and possible future filtering. They are not included in the `text` field used in the reported retrieval experiments.
+
+If an abstract is unavailable, the thesis is represented mainly through its title and English title when available, with less textual information.
 
 ---
 
@@ -291,6 +318,10 @@ The TF-IDF vectorizer uses:
 | Maximum features | 50,000 |
 | Similarity | cosine similarity |
 
+TF-IDF is computed on the `text` field, which contains the title, English title and abstract.
+
+No manual stopword list is applied. The inverse document frequency component already reduces the weight of very common terms, and keeping stopwords avoids removing potentially useful French academic expressions.
+
 TF-IDF is simple, fast and interpretable. It works well when the query and the document share explicit terms, but it can retrieve partial matches when only one part of the query is present.
 
 ---
@@ -313,7 +344,7 @@ This model maps both theses and queries into dense vectors of dimension 384.
 
 No fine-tuning is performed because the dataset does not contain supervised query-document relevance labels.
 
-The document embeddings are computed once and stored locally as a NumPy matrix:
+The document embeddings are computed once from the same `text` field used by TF-IDF and stored locally as a NumPy matrix:
 
 ```text
 data/processed/embeddings/theses_embeddings.npy
@@ -384,6 +415,13 @@ Manual relevance was assessed on the top 5 results for each query, for a total o
 | TF-IDF | 11 | 25 | 4 | 27.5% |
 | Embeddings | 22 | 18 | 0 | 55.0% |
 
+Using `relevant = 1`, `partial = 0.5` and `irrelevant = 0`, the diagnostic graded precision over the inspected top-5 results is:
+
+| Method | Strict Precision@5 | Graded Precision@5 | Irrelevant rate |
+|---|---:|---:|---:|
+| TF-IDF | 0.275 | 0.588 | 10.0% |
+| Embeddings | 0.550 | 0.775 | 0.0% |
+
 The detailed analysis is provided in the notebooks and in the final report.
 
 ---
@@ -392,9 +430,11 @@ The detailed analysis is provided in the notebooks and in the final report.
 
 The TF-IDF baseline is strong when query terms appear explicitly in the indexed fields. However, it often retrieves partial matches when only one part of the query is present.
 
-The embedding method retrieves more fully relevant results in the manual evaluation. It is better at capturing the global semantic intent of queries, especially when a query combines a method and an application domain.
+In this small manual evaluation, the embedding method retrieves more fully relevant results than TF-IDF. It is better at capturing the global semantic intent of queries, especially when a query combines a method and an application domain.
 
 The overlap@5 between TF-IDF and embeddings is generally low. This suggests that lexical and semantic retrieval capture different signals and could be combined in a hybrid retrieval system.
+
+BM25 was not implemented in order to keep the comparison focused and reproducible before the deadline. It is a natural extension, together with hybrid retrieval combining lexical and semantic scores.
 
 ---
 
@@ -457,9 +497,12 @@ The following files and folders should not be committed:
 data/
 .venv/
 *.npy
+*.pkl
 __pycache__/
 .ipynb_checkpoints/
 ```
+
+The final PDF report should be committed in the `report/` folder.
 
 To reproduce the project from scratch:
 
