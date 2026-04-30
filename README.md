@@ -1,8 +1,11 @@
 # NLP Theses Search
 
-Semantic and lexical search engine for French PhD theses using data from [theses.fr](https://theses.fr).
+Lexical and semantic search engine for French PhD theses using data from [theses.fr](https://theses.fr).
 
-The goal of this project is to compare a classical lexical retrieval baseline with a semantic retrieval approach on French academic text data.
+This project compares two information retrieval approaches on French academic text data:
+
+1. **TF-IDF + cosine similarity** as a lexical baseline.
+2. **Multilingual Sentence Transformer embeddings** as a semantic retrieval method.
 
 Given a natural language query such as:
 
@@ -16,22 +19,17 @@ or:
 deep learning for medical imaging
 ```
 
-the system returns the most relevant PhD theses with their title, English title when available, abstract, year, discipline, institution, theses.fr URL, and similarity score.
+the system returns the most relevant PhD theses with their title, English title when available, abstract, year, discipline, institution, theses.fr URL and similarity score.
 
 ---
 
 ## Project motivation
 
-Search engines based only on lexical matching can fail when the query and the document use different words to express similar ideas.
+A lexical search engine works well when the query and the document share the same words. However, it can fail when the same idea is expressed with different vocabulary.
 
-For example, a thesis about medical image analysis may be relevant to a query about deep learning for radiology, even if the exact keywords do not perfectly match.
+For example, a query about deep learning for medical imaging may be relevant to theses mentioning neural networks, image registration, segmentation, radiology or computer-aided diagnosis, even if the exact query terms are not all present.
 
-This project compares two retrieval approaches:
-
-1. **TF-IDF + cosine similarity**, used as a classical lexical baseline.
-2. **Transformer-based sentence embeddings**, used for semantic retrieval.
-
-The objective is to evaluate whether transformer embeddings improve retrieval quality compared with a sparse lexical baseline on enriched theses.fr metadata and abstracts.
+The goal of this project is to study whether semantic embeddings improve retrieval quality compared with a sparse lexical baseline on enriched theses.fr metadata and abstracts.
 
 ---
 
@@ -43,7 +41,7 @@ The data is collected from the public theses.fr search API:
 https://theses.fr/api/v1/theses/recherche/
 ```
 
-The current dataset contains:
+The current processed dataset contains:
 
 | Item | Value |
 |---|---:|
@@ -52,7 +50,7 @@ The current dataset contains:
 | Abstract coverage | 92.27% |
 | Processed columns | 11 |
 
-The data was collected using broad queries related to artificial intelligence, machine learning, data science, statistics, computer science, and related fields.
+The data was collected using broad queries related to artificial intelligence, machine learning, data science, statistics, computer science and related fields.
 
 Each thesis contains the following fields:
 
@@ -70,7 +68,7 @@ Each thesis contains the following fields:
 | `url` | Link to the thesis page |
 | `text` | Final searchable text field |
 
-Raw and processed datasets are not committed to the repository to keep it lightweight. They can be regenerated using the provided scripts.
+Raw and processed datasets are not committed to the repository to keep it lightweight. They can be regenerated using the scripts in `src/`.
 
 ---
 
@@ -83,7 +81,8 @@ nlp-theses-search/
 │   └── processed/
 │── notebooks/
 │   ├── 01_exploration.ipynb
-│   └── 02_tfidf_results.ipynb
+│   ├── 02_tfidf_results.ipynb
+│   └── 03_embedding_results.ipynb
 │── src/
 │   ├── __init__.py
 │   ├── collect.py
@@ -99,6 +98,22 @@ nlp-theses-search/
 │── README.md
 │── .gitignore
 ```
+
+---
+
+## Main files
+
+| File | Role |
+|---|---|
+| `src/collect.py` | Collects thesis metadata from the theses.fr search API. |
+| `src/enrich_abstracts.py` | Visits individual thesis pages and extracts visible abstracts from HTML. |
+| `src/preprocess.py` | Builds the final searchable `text` field. |
+| `src/tfidf_search.py` | Implements TF-IDF retrieval with cosine similarity. |
+| `src/embedding_search.py` | Implements semantic retrieval using pretrained multilingual Sentence Transformer embeddings. |
+| `notebooks/01_exploration.ipynb` | Exploratory data analysis of the processed corpus. |
+| `notebooks/02_tfidf_results.ipynb` | Manual analysis of TF-IDF retrieval results. |
+| `notebooks/03_embedding_results.ipynb` | Manual analysis of embedding retrieval and comparison with TF-IDF. |
+| `report/` | Contains the final report files. |
 
 ---
 
@@ -132,7 +147,7 @@ pip install -r requirements.txt
 
 ## Data pipeline
 
-The project follows a three-step data pipeline:
+The project follows a three-step pipeline:
 
 1. metadata collection from the theses.fr API;
 2. abstract enrichment from individual thesis pages;
@@ -168,21 +183,21 @@ The collection script deduplicates theses by thesis identifier.
 
 The theses.fr search endpoint provides structured metadata such as titles, disciplines, subjects, institutions and dates. However, abstracts are not included directly in the search endpoint.
 
-To enrich the dataset with abstracts, the project includes a separate script that visits each thesis detail page and extracts the visible abstract from the HTML.
+To enrich the dataset with abstracts, the project includes a separate script that visits each thesis page and extracts the visible abstract from the HTML.
 
-For a quick test on 20 theses:
+Quick test:
 
 ```bash
 python -m src.enrich_abstracts --limit 20
 ```
 
-For the first 1,000 theses:
+First 1,000 theses:
 
 ```bash
 python -m src.enrich_abstracts --limit 1000 --sleep-seconds 0.3
 ```
 
-To enrich the full dataset:
+Full dataset:
 
 ```bash
 python -m src.enrich_abstracts --limit -1 --sleep-seconds 0.3
@@ -194,13 +209,13 @@ This creates:
 data/raw/theses_raw_enriched.csv
 ```
 
-The current enriched dataset contains 16,831 non-empty abstracts out of 18,242 theses, corresponding to a 92.27% abstract coverage.
+The current enriched dataset contains 16,831 non-empty abstracts out of 18,242 theses.
 
 ---
 
 ## 3. Preprocessing
 
-To clean the enriched data and build the searchable text field:
+To clean the enriched data and build the final searchable text field:
 
 ```bash
 python -m src.preprocess --input data/raw/theses_raw_enriched.csv --output data/processed/theses_clean.csv
@@ -218,7 +233,7 @@ The final `text` column is built by concatenating:
 title + title_en + abstract + discipline + subjects + institution
 ```
 
-This representation makes retrieval robust to missing abstracts: if an abstract is unavailable, the thesis can still be retrieved through its title, English title, discipline, subjects and institution.
+This makes retrieval robust to missing abstracts. If an abstract is unavailable, the thesis can still be retrieved through its title, English title, discipline, subjects and institution.
 
 ---
 
@@ -253,13 +268,13 @@ The most frequent discipline is `Informatique`, with 3,734 theses.
 
 The first retrieval baseline represents each thesis as a sparse TF-IDF vector and ranks theses by cosine similarity with the query.
 
-Run a TF-IDF search with:
+Run a TF-IDF search:
 
 ```bash
 python -m src.tfidf_search --query "apprentissage profond pour imagerie médicale" --top-k 10
 ```
 
-Example with output saved as CSV:
+Save results as CSV:
 
 ```bash
 python -m src.tfidf_search --query "apprentissage profond pour imagerie médicale" --top-k 10 --output data/processed/tfidf_results_deep_learning_medical_imaging.csv
@@ -280,15 +295,59 @@ TF-IDF is simple, fast and interpretable. It works well when the query and the d
 
 ---
 
-## TF-IDF result analysis
+## Semantic embedding retrieval
 
-The notebook:
+The semantic retrieval method is implemented in:
 
 ```text
-notebooks/02_tfidf_results.ipynb
+src/embedding_search.py
 ```
 
-evaluates the TF-IDF baseline on 8 queries.
+It uses the pretrained multilingual Sentence Transformer model:
+
+```text
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+This model maps both theses and queries into dense vectors of dimension 384.
+
+No fine-tuning is performed because the dataset does not contain supervised query-document relevance labels.
+
+The document embeddings are computed once and stored locally as a NumPy matrix:
+
+```text
+data/processed/embeddings/theses_embeddings.npy
+```
+
+For the current corpus, the embedding matrix has shape:
+
+```text
+(18242, 384)
+```
+
+On CPU, computing all document embeddings took approximately 13 minutes and 35 seconds.
+
+First run, compute and save document embeddings:
+
+```bash
+python -m src.embedding_search --input data/processed/theses_clean.csv --embeddings-path data/processed/embeddings/theses_embeddings.npy --batch-size 32 --max-chars 4000 --recompute
+```
+
+Later runs, load existing embeddings and search:
+
+```bash
+python -m src.embedding_search --input data/processed/theses_clean.csv --embeddings-path data/processed/embeddings/theses_embeddings.npy --query "apprentissage profond pour imagerie médicale" --top-k 10
+```
+
+The expensive step is computing document embeddings. It is done only once. At query time, only the query is encoded and compared with the stored document embeddings using cosine similarity.
+
+---
+
+## Evaluation
+
+Since the dataset does not provide ground-truth relevance labels, the evaluation is qualitative and diagnostic.
+
+The retrieval methods were evaluated on the same 8 queries:
 
 French queries:
 
@@ -308,44 +367,7 @@ natural language processing for historical documents
 machine learning for credit risk
 ```
 
-The English queries are included to test the sensitivity of lexical retrieval to query language.
-
-A manual inspection was performed on the top 5 results for each query, for a total of 40 inspected results.
-
-| Label | Count | Rate |
-|---|---:|---:|
-| Relevant | 11 | 27.5% |
-| Partial | 25 | 62.5% |
-| Irrelevant | 4 | 10.0% |
-
-The results show that TF-IDF rarely returns completely unrelated documents, but most retrieved results are only partially relevant. This confirms that TF-IDF is a strong lexical baseline, while also motivating the use of semantic embeddings.
-
----
-
-## Planned semantic retrieval
-
-The next step is to implement transformer-based semantic retrieval.
-
-The planned method is:
-
-1. encode each thesis `text` field with a pretrained Sentence Transformer model;
-2. encode the user query with the same model;
-3. rank theses by cosine similarity in the embedding space;
-4. compare results with the TF-IDF baseline.
-
-This method is expected to better handle vocabulary mismatch and query language variation.
-
----
-
-## Evaluation strategy
-
-Since the dataset does not provide ground-truth relevance labels, the evaluation combines:
-
-- qualitative analysis of top retrieved theses for selected queries;
-- manual relevance judgments on a small set of representative queries;
-- comparison of TF-IDF and embedding rankings;
-- overlap between top-k results;
-- discussion of success and failure cases.
+The English queries are included to test sensitivity to query language.
 
 Manual relevance labels use three categories:
 
@@ -354,6 +376,25 @@ Manual relevance labels use three categories:
 | `relevant` | The thesis clearly matches the full query intent |
 | `partial` | The thesis matches only part of the query |
 | `irrelevant` | The thesis is not related to the query intent |
+
+Manual relevance was assessed on the top 5 results for each query, for a total of 40 inspected results per method.
+
+| Method | Relevant | Partial | Irrelevant | Relevant rate |
+|---|---:|---:|---:|---:|
+| TF-IDF | 11 | 25 | 4 | 27.5% |
+| Embeddings | 22 | 18 | 0 | 55.0% |
+
+The detailed analysis is provided in the notebooks and in the final report.
+
+---
+
+## Main findings
+
+The TF-IDF baseline is strong when query terms appear explicitly in the indexed fields. However, it often retrieves partial matches when only one part of the query is present.
+
+The embedding method retrieves more fully relevant results in the manual evaluation. It is better at capturing the global semantic intent of queries, especially when a query combines a method and an application domain.
+
+The overlap@5 between TF-IDF and embeddings is generally low. This suggests that lexical and semantic retrieval capture different signals and could be combined in a hybrid retrieval system.
 
 ---
 
@@ -366,12 +407,15 @@ The final report follows the NeurIPS template and includes:
 3. Exploratory data analysis
 4. Methods
 5. Experimental setup
-6. TF-IDF retrieval results
-7. Semantic retrieval results
-8. Discussion
-9. Conclusion
+6. Retrieval results
+7. Discussion
+8. Conclusion
 
-The report is limited to 10 pages. If necessary, detailed examples and extended result tables will be moved to an appendix or kept in the notebooks.
+The report is located in:
+
+```text
+report/
+```
 
 ---
 
@@ -386,14 +430,46 @@ Implemented:
 - EDA notebook;
 - TF-IDF search script;
 - TF-IDF result analysis notebook;
-- first manual relevance analysis.
+- semantic embedding search script;
+- embedding result analysis notebook;
+- manual relevance comparison between TF-IDF and embeddings;
+- NeurIPS-style report.
 
-Next steps:
+Main results:
 
-- update and push the repository;
-- implement transformer embedding retrieval;
-- compare TF-IDF and embedding results;
-- finalize the report.
+| Metric | Value |
+|---|---:|
+| Unique theses collected | 18,242 |
+| Non-empty abstracts extracted | 16,831 |
+| Abstract coverage | 92.27% |
+| TF-IDF relevant rate | 27.5% |
+| Embedding relevant rate | 55.0% |
+
+---
+
+## Reproducibility notes
+
+The data and embedding files are excluded from GitHub to keep the repository lightweight.
+
+The following files and folders should not be committed:
+
+```text
+data/
+.venv/
+*.npy
+__pycache__/
+.ipynb_checkpoints/
+```
+
+To reproduce the project from scratch:
+
+1. install the dependencies;
+2. collect metadata with `src.collect`;
+3. enrich abstracts with `src.enrich_abstracts`;
+4. preprocess the dataset with `src.preprocess`;
+5. run TF-IDF search with `src.tfidf_search`;
+6. compute embeddings once with `src.embedding_search`;
+7. analyze results in the notebooks.
 
 ---
 
